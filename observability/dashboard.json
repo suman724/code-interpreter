@@ -1,0 +1,13 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "properties": {
+        "title": "Session creation latency",
+        "metrics": [["CodeInterpreter", "SessionCreateLatency"]],
+        "period": 60,
+        "stat": "Average"
+      }
+    }
+  ]
+}
