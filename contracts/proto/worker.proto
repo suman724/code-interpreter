@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package codeinterpreter.worker.v1;
+
+message SessionRef {
+  string session_id = 1;
+  string sandbox_id = 2;
+  string tenant_id = 3;
+}
+
+message StartSessionRequest {
+  SessionRef session_ref = 1;
+  string runtime_image = 2;
+  uint32 cpus = 3;
+  uint32 memory_mib = 4;
+  uint32 disk_mib = 5;
+}
+
+message StartSessionResponse {
+  bool ok = 1;
+  string sandbox_id = 2;
+}
+
+message StopSessionRequest {
+  SessionRef session_ref = 1;
+}
+
+message StopSessionResponse {
+  bool ok = 1;
+}
+
+message ExecuteCodeRequest {
+  SessionRef session_ref = 1;
+  string code = 2;
+  uint32 timeout_seconds = 3;
+}
+
+message CommandRequest {
+  SessionRef session_ref = 1;
+  string command = 2;
+  repeated string args = 3;
+  uint32 timeout_seconds = 4;
+}
+
+message ExecutionResult {
+  string execution_id = 1;
+  string stdout = 2;
+  string stderr = 3;
+  int32 exit_code = 4;
+  bool has_error = 5;
+}
+
+message MetricsRequest {
+  SessionRef session_ref = 1;
+}
+
+message MetricsResponse {
+  double cpu_usage_percent = 1;
+  double memory_usage_mib = 2;
+  uint64 disk_usage_bytes = 3;
+  bool running = 4;
+}
+
+message PutFileMeta {
+  SessionRef session_ref = 1;
+  string path = 2;
+  uint64 total_bytes = 3;
+  string sha256 = 4;
+  bool overwrite = 5;
+}
+
+message PutFileChunk {
+  bytes data = 1;
+  uint64 offset = 2;
+  bool eof = 3;
+}
+
+message PutFileRequest {
+  oneof msg {
+    PutFileMeta meta = 1;
+    PutFileChunk chunk = 2;
+  }
+}
+
+message PutFileResponse {
+  bool ok = 1;
+  uint64 bytes_written = 2;
+  string sha256 = 3;
+}
+
+message GetFileRequest {
+  SessionRef session_ref = 1;
+  string path = 2;
+}
+
+message GetFileResponse {
+  bytes data = 1;
+  uint64 offset = 2;
+  bool eof = 3;
+  string sha256 = 4;
+}
+
+service WorkerService {
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
+  rpc ExecuteCode(ExecuteCodeRequest) returns (ExecutionResult);
+  rpc RunCommand(CommandRequest) returns (ExecutionResult);
+  rpc GetMetrics(MetricsRequest) returns (MetricsResponse);
+  rpc PutFile(stream PutFileRequest) returns (PutFileResponse);
+  rpc GetFile(GetFileRequest) returns (stream GetFileResponse);
+}
