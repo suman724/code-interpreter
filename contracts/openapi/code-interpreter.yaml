@@ -1,0 +1,535 @@
+openapi: 3.1.0
+info:
+  title: Code Interpreter Platform API
+  version: 1.0.0
+  description: Session-backed, multi-tenant untrusted code execution using microVM sandboxes.
+servers:
+  - url: https://api.example.com
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+
+    RuntimeSpec:
+      type: object
+      required: [language]
+      properties:
+        language:
+          type: string
+          enum: [python, nodejs]
+        image:
+          type: string
+          description: Optional runtime image override (must be allowlisted).
+        version:
+          type: string
+          description: Optional runtime version label.
+
+    ResourceLimits:
+      type: object
+      properties:
+        cpus:
+          type: integer
+          minimum: 1
+        memory_mib:
+          type: integer
+          minimum: 128
+        disk_mib:
+          type: integer
+          minimum: 256
+
+    EgressPolicy:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [deny_all, allow_all, allowlist]
+        allowlist:
+          type: array
+          items:
+            type: string
+
+    SessionCreateRequest:
+      type: object
+      required: [runtime]
+      properties:
+        runtime:
+          $ref: '#/components/schemas/RuntimeSpec'
+        resources:
+          $ref: '#/components/schemas/ResourceLimits'
+        egress_policy:
+          $ref: '#/components/schemas/EgressPolicy'
+        ttl_seconds:
+          type: integer
+          minimum: 60
+        idle_timeout_seconds:
+          type: integer
+          minimum: 30
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Session:
+      type: object
+      required: [session_id, state, created_at]
+      properties:
+        session_id:
+          type: string
+        state:
+          type: string
+          enum: [STARTING, READY, STOPPING, STOPPED, ERROR]
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        idle_expires_at:
+          type: string
+          format: date-time
+        runtime:
+          $ref: '#/components/schemas/RuntimeSpec'
+        resources:
+          $ref: '#/components/schemas/ResourceLimits'
+        egress_policy:
+          $ref: '#/components/schemas/EgressPolicy'
+
+    ExecutionCreateRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 600
+          default: 30
+        mode:
+          type: string
+          enum: [sync, async]
+          default: sync
+        capture_paths:
+          type: array
+          items:
+            type: string
+        correlation_id:
+          type: string
+
+    Execution:
+      type: object
+      required: [execution_id, session_id, status, created_at]
+      properties:
+        execution_id:
+          type: string
+        session_id:
+          type: string
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, TIMEOUT, FAILED, CANCELED]
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        stdout:
+          type: string
+        stderr:
+          type: string
+        has_error:
+          type: boolean
+        exit_code:
+          type: integer
+        timing_ms:
+          type: object
+          properties:
+            queue:
+              type: integer
+            run:
+              type: integer
+        artifacts:
+          type: array
+          items:
+            type: object
+            required: [path]
+            properties:
+              path:
+                type: string
+              s3_key:
+                type: string
+              download_url:
+                type: string
+
+    CommandRequest:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+        args:
+          type: array
+          items:
+            type: string
+        timeout_seconds:
+          type: integer
+          minimum: 1
+          maximum: 600
+          default: 30
+        mode:
+          type: string
+          enum: [sync, async]
+          default: sync
+
+    FileUploadUrlRequest:
+      type: object
+      required: [path, content_type, size_bytes]
+      properties:
+        path:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 1
+
+    FileUploadUrlResponse:
+      type: object
+      required: [upload_url, object_key, headers]
+      properties:
+        upload_url:
+          type: string
+        object_key:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    FileCommitRequest:
+      type: object
+      required: [path, object_key]
+      properties:
+        path:
+          type: string
+        object_key:
+          type: string
+
+    FileDownloadUrlRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+
+    FileDownloadUrlResponse:
+      type: object
+      required: [download_url]
+      properties:
+        download_url:
+          type: string
+
+    MetricsResponse:
+      type: object
+      properties:
+        cpu_usage_percent:
+          type: number
+        memory_usage_mib:
+          type: number
+        disk_usage_bytes:
+          type: integer
+        running:
+          type: boolean
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/sessions:
+    post:
+      summary: Create a session-backed sandbox
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionCreateRequest'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/sessions/{session_id}:
+    get:
+      summary: Get session details
+      operationId: getSession
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Stop and delete a session
+      operationId: deleteSession
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  /v1/sessions/{session_id}/executions:
+    post:
+      summary: Execute code in the session sandbox
+      operationId: executeCode
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionCreateRequest'
+      responses:
+        '200':
+          description: Synchronous execution result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '202':
+          description: Accepted (async)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/sessions/{session_id}/commands:
+    post:
+      summary: Run a command in the session sandbox
+      operationId: runCommand
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandRequest'
+      responses:
+        '200':
+          description: Synchronous command result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '202':
+          description: Accepted (async)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/executions/{execution_id}:
+    get:
+      summary: Get execution record
+      operationId: getExecution
+      parameters:
+        - in: path
+          name: execution_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/executions/{execution_id}/events:
+    get:
+      summary: Stream execution events
+      operationId: getExecutionEvents
+      parameters:
+        - in: path
+          name: execution_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE stream
+
+  /v1/sessions/{session_id}/files:upload-url:
+    post:
+      summary: Create a presigned upload URL
+      operationId: getUploadUrl
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileUploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadUrlResponse'
+
+  /v1/sessions/{session_id}/files:commit:
+    post:
+      summary: Import uploaded file into sandbox
+      operationId: commitUpload
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileCommitRequest'
+      responses:
+        '200':
+          description: File committed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+  /v1/sessions/{session_id}/files:download-url:
+    post:
+      summary: Create a presigned download URL
+      operationId: getDownloadUrl
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileDownloadUrlRequest'
+      responses:
+        '200':
+          description: Presigned download URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileDownloadUrlResponse'
+
+  /v1/sessions/{session_id}/metrics:
+    get:
+      summary: Get session metrics
+      operationId: getSessionMetrics
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
